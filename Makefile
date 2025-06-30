@@ -1,0 +1,54 @@
+CXX ?= g++
+CXXFLAGS ?= -Wall -g
+LEXER_DIR ?= ./lexer
+PARSER_DIR ?= ./parser
+PREPROCESSOR_DIR ?= ./basm-script
+EXAMPLES_DIR ?= ./examples
+LDFLAGS ?=  -lfl -ly -L$(LEXER_DIR) -L$(PARSER_DIR) -L$(PREPROCESSOR_DIR) -lparser -llexer -lbscp
+
+# 默认目标
+all: main
+
+# 构建词法分析器库
+$(LEXER_DIR)/liblexer.a:
+	$(MAKE) -C $(LEXER_DIR) LEXER_DIR=$(abspath $(LEXER_DIR))
+
+# 构建语法分析器库
+$(PARSER_DIR)/libparser.a:
+	$(MAKE) -C $(PARSER_DIR) LEXER_DIR=$(abspath $(LEXER_DIR)) PREPROCESSOR_DIR=$(abspath $(PREPROCESSOR_DIR))
+# 构建语法分析器库
+
+preprocessor_lib: $(LEXER_DIR)/liblexer.a
+	cp $(LEXER_DIR)/liblexer.a $(PREPROCESSOR_DIR)
+	$(MAKE) -C $(PREPROCESSOR_DIR) LEXER_DIR=$(abspath $(LEXER_DIR))
+
+# 编译C++主程序
+main.o: main.cpp $(LEXER_DIR)/lex.h $(PARSER_DIR)/parser.h $(PREPROCESSOR_DIR)/bscp.h
+	$(CXX) $(CXXFLAGS) -I$(LEXER_DIR) -I$(PARSER_DIR) -I$(PREPROCESSOR_DIR) -c $< -o $@
+
+# 链接程序
+main: main.o $(LEXER_DIR)/liblexer.a $(PARSER_DIR)/libparser.a preprocessor_lib
+	$(CXX) $(CXXFLAGS) -o $@ main.o $(LDFLAGS)
+
+# 创建示例目录
+$(EXAMPLES_DIR):
+	mkdir -p $(EXAMPLES_DIR)
+
+# 创建一个简单的测试文件
+test.c:
+	echo 'int main() { printf("Hello, world!\\n"); return 0; }' > test.c
+
+# 运行测试
+test: main test.c
+	./main --both test.c
+
+# 清理生成的文件
+clean:
+	$(MAKE) -C $(LEXER_DIR) clean
+	$(MAKE) -C $(PARSER_DIR) clean
+	$(MAKE) -C $(PREPROCESSOR_DIR) clean
+	rm -rf $(PREPROCESSOR_DIR)/liblexer.a
+	rm -f main.o main test.c
+	rm -rf $(EXAMPLES_DIR)
+
+.PHONY: all lexer_lib parser_lib test clean
