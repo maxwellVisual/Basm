@@ -37,21 +37,6 @@ struct lex_token {
 /* 全局变量声明 */
 extern struct lex_token current_token;
 
-/* 这些变量在lex.c中定义，但需要在lex.lex中访问 */
-extern char* dynamic_buffer;
-extern size_t buffer_size;
-extern size_t buffer_capacity;
-extern char* string_buffer;
-extern size_t string_buffer_size;
-extern size_t string_buffer_capacity;
-
-/* 辅助函数声明 */
-void init_dynamic_buffer(void);
-void append_to_buffer(const char* text, size_t len);
-void free_dynamic_buffer(void);
-void init_string_buffer(void);
-void append_to_string_buffer(const char* text, size_t len);
-void free_string_buffer(void);
 
 /* 公共接口函数 */
 /**

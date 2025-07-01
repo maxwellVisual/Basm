@@ -6,48 +6,30 @@ extern char* yytext;
 extern int yyleng;
 
 /* 设置词法标记并返回 */
-#define SET_TOKEN_DYNAMIC(token_type) \
+/* 设置token类型并复制yytext内容 */
+#define SET_TOKEN(token_type) \
     do { \
-        init_dynamic_buffer(); \
-        append_to_buffer(yytext, yyleng); \
         current_token.type = token_type; \
-        current_token.raw = dynamic_buffer; \
-        current_token.raw_size = buffer_size; \
-        dynamic_buffer = NULL; /* 转移所有权到token */ \
-        buffer_size = 0; \
-        buffer_capacity = 0; \
+        current_token.raw_size = yyleng; \
+        current_token.raw = yyleng > 0 ? strndup(yytext, yyleng) : NULL; \
         return 1; \
     } while(0)
 
 /* 设置不同类型token的辅助宏 */
-#define WORD_TOKEN()            SET_TOKEN_DYNAMIC(lex_word)
-#define NUMBER_TOKEN()          SET_TOKEN_DYNAMIC(lex_number)
-#define STRING_TOKEN()          SET_TOKEN_DYNAMIC(lex_string)
-#define PUNCTUATION_TOKEN()     SET_TOKEN_DYNAMIC(lex_punctuation)
-#define PREPROCESSOR_TOKEN()    SET_TOKEN_DYNAMIC(lex_preprocessor)
-#define EOL_TOKEN()             SET_TOKEN_DYNAMIC(lex_eol)
-#define ASSEMBLY_TOKEN()        SET_TOKEN_DYNAMIC(lex_assembly)
-#define UNKNOWN_TOKEN()         SET_TOKEN_DYNAMIC(lex_unknown)
+#define WORD_TOKEN()            SET_TOKEN(lex_word)
+#define NUMBER_TOKEN()          SET_TOKEN(lex_number)
+#define STRING_TOKEN()          SET_TOKEN(lex_string) 
+#define PUNCTUATION_TOKEN()     SET_TOKEN(lex_punctuation)
+#define EOL_TOKEN()             SET_TOKEN(lex_eol)
+#define ASSEMBLY_TOKEN()        SET_TOKEN(lex_assembly)
+#define UNKNOWN_TOKEN()         SET_TOKEN(lex_unknown)
 
 /* EOF的特殊处理 */
 #define EOF_TOKEN() \
     do { \
-        free_dynamic_buffer(); /* 确保释放缓冲区 */ \
         current_token.type = lex_eof; \
         current_token.raw = NULL; \
         current_token.raw_size = 0; \
-        return 1; \
-    } while(0)
-
-/* 将字符串缓冲区内容设置为token并释放缓冲区 */
-#define SET_STRING_TOKEN(token_type) \
-    do { \
-        current_token.type = token_type; \
-        current_token.raw = string_buffer; \
-        current_token.raw_size = string_buffer_size; \
-        string_buffer = NULL; /* 转移所有权到token */ \
-        string_buffer_size = 0; \
-        string_buffer_capacity = 0; \
         return 1; \
     } while(0)
 %}
