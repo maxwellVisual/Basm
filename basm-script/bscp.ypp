@@ -153,16 +153,8 @@ extern int preprocess();
 %nonassoc '[' '.'
 
 %type <value> expr
-%type <obj> object
-%type <value> input
 
 %%
-
-input:
-    %empty { /* empty input */ }
-    | input expr ';' { /* handle expression */ }
-    | input object ';' { /* handle object */ }
-    ;
 
 expr: 
     NUMBER { $$ = new bscp_num(yyget_extra(), $1); }
@@ -181,7 +173,9 @@ expr:
         delete $1;
       }
     | '(' expr ')' { $$ = $2; }
-    | '{' object '}' { $$ = $2; }
+    | '{' expr '}' { 
+        $$ = new bscp_obj(yyget_extra()); 
+    }
     | expr '.' expr { 
         require_true(dynamic_cast<bscp_obj*>($1), "Left operand of '.' must be an object");
         $$ = new bscp_num(yyget_extra(), static_cast<bscp_num*>($3)->value);
@@ -403,56 +397,12 @@ expr:
       }
     | expr ',' expr { $$ = $3; }
     ;
-
-object:
-    '{' expr '}' {
-        $$ = new bscp_obj(yyget_extra()); 
-    }
-    /* '{' '}' { $$ = new bscp_obj(yyget_extra()); }
-    | '{' object_items '}' { $$ = static_cast<bscp_obj*>($2); } */
-    ;
-
-//object_items:
-//    expr { $$ = static_cast<bscp_value*>(s_obj(yyget_extra(), $1)); }
-//    | object_items ',' expr { /* handle multiple items */ }
-//    ; 
-
 %%
 
 void yy::parser::error(const std::string& msg) {
     fprintf(stderr, "Error: %s\n", msg.c_str());
 }
 
-/* bscp_obj* s_obj(bscp_obj* parent, bscp_value* first) {
-    bscp_obj* obj = new bscp_obj(parent);
-    
-    // Add first item if provided
-    if (first) {
-        // For all types, add as anonymous field
-        obj->fields.emplace("", Field(*first, false));
-    }
-
-    // Process remaining items (if any)
-    struct lex_token t;
-    while (lex_next(&t) && t.type != lex_punctuation) {
-        bscp_value* value = s_expr(obj, std::numeric_limits<int>::max());
-        if (!value) {
-            delete obj;
-            return nullptr;
-        }
-    }
-
-    // Clean up temporary fields
-    for (auto it = obj->fields.begin(); it != obj->fields.end(); ) {
-        if (it->second.is_tmp) {
-            obj->fields.erase(it++);
-        } else {
-            ++it;
-        }
-    }
-
-    return obj;
-} */
 
 int yylex(yy::parser::value_type* value){
     lex_next(&value->token);
