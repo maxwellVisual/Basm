@@ -16,15 +16,17 @@ LIBS = $(LEXER_LIB) $(PARSER_LIB) $(PREPROCESSOR_LIB)
 all: main
 
 # 构建词法分析器库
-$(LEXER_DIR)/liblexer.a:
+$(LEXER_LIB):
 	$(MAKE) -C $(LEXER_DIR) LEXER_DIR=$(abspath $(LEXER_DIR))
 
 # 构建语法分析器库
-$(PARSER_DIR)/libparser.a: $(PREPROCESSOR_DIR)/bscp.hpp
+$(PARSER_LIB): $(PREPROCESSOR_DIR)/bscp.hpp
 	$(MAKE) -C $(PARSER_DIR) LEXER_DIR=$(abspath $(LEXER_DIR)) PREPROCESSOR_DIR=$(abspath $(PREPROCESSOR_DIR))
 
 # 构建预编译器库
-$(PREPROCESSOR_DIR)/libbscp.a $(PREPROCESSOR_DIR)/bscp.hpp: $(LEXER_DIR)/liblexer.a
+headers: $(PREPROCESSOR_DIR)/bscp.hpp
+libs: $(LIBS)
+$(PREPROCESSOR_LIB) $(PREPROCESSOR_DIR)/bscp.hpp: $(LEXER_LIB)
 	$(MAKE) -C $(PREPROCESSOR_DIR) LEXER_DIR=$(abspath $(LEXER_DIR))
 
 # 编译C++主程序
@@ -52,8 +54,6 @@ clean:
 	$(MAKE) -C $(LEXER_DIR) clean
 	$(MAKE) -C $(PARSER_DIR) clean
 	$(MAKE) -C $(PREPROCESSOR_DIR) clean
-	rm -rf $(PREPROCESSOR_DIR)/liblexer.a
 	rm -f main.o main test.c
-	rm -rf $(EXAMPLES_DIR)
 
-.PHONY: all test clean
+.PHONY: all test clean libs headers
