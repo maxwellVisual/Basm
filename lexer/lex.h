@@ -10,6 +10,9 @@ extern "C" {
 #include <stdlib.h>
 #include <string.h>
 
+extern FILE* yyin;
+extern int yyparse();
+
 /* 公共常量定义 */
 #define LEX_TOKEN_STREAM_BUFSIZE BUFSIZ
 #define INITIAL_BUFFER_SIZE 64

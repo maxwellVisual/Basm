@@ -8,6 +8,7 @@ main
 
 # Intermediate files
 *.yy.c
+*.tab.c
 
 # Prerequisites
 *.d

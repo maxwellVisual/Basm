@@ -1,0 +1,460 @@
+%{
+#include "bscp.hpp"
+
+#include <typeinfo>
+#include <string>
+#include <math.h>
+#include <map>
+#include <cstring>
+
+#include "lex.h"
+
+bscp_obj* s_obj(bscp_obj* parent, bscp_value* first);
+
+int yylex(yy::parser::value_type* value);
+
+extern struct lex_token token;
+extern const char* err_msg;
+
+#define require_true(expr, ...) \
+    do { \
+        if(!(expr)) { \
+            fprintf(stderr, __VA_ARGS__); \
+            errno = 1; \
+            YYERROR; \
+        } \
+    } while(false)
+
+static bool value2bool(bscp_value* value) {
+    if (dynamic_cast<bscp_num*>(value)) {
+        return static_cast<bscp_num*>(value)->value != 0;
+    }
+    return !dynamic_cast<bscp_null*>(value);
+}
+#define yyget_extra() ((bscp_obj*)this)
+
+
+%}
+
+%require "3.2"
+
+%code requires {
+#include "lex.h"
+
+#include <map>
+#include <limits>
+#include <string>
+
+class bscp_obj;
+
+class bscp_value
+{
+public:
+    std::string name;
+    bscp_obj* parent;
+    virtual ~bscp_value() {} // Needed for dynamic_cast
+protected:
+    bscp_value(bscp_obj* parent): parent(parent){}
+};
+
+class bscp_null: public bscp_value
+{
+public:
+    bscp_null(bscp_obj* parent): bscp_value(parent){}
+};
+
+class bscp_num: public bscp_value
+{
+public:
+    long double value;
+
+    // positive value only
+    bscp_num(bscp_obj* parent, std::string& raw)
+        : bscp_value(parent), value(std::strtold(raw.c_str(), nullptr)){}
+
+    bscp_num(bscp_obj* parent, long double value)
+        : bscp_value(parent), value(value){}
+
+    bscp_num(bscp_obj* parent)
+        : bscp_value(parent), value(0){}
+};
+
+class Field
+{
+public:
+    std::string name;
+    bscp_value* value;
+    bool is_tmp;
+    Field(): value(nullptr), is_tmp(false) {}
+    Field(bscp_value& value, bool is_tmp = true): value(&value), is_tmp(is_tmp){}
+};
+class bscp_obj: public bscp_value
+{
+public:
+    std::map<std::string, Field> fields;
+    bscp_obj(bscp_obj* parent): bscp_value(parent){}
+    inline Field& operator[](size_t id){
+        return this->fields[std::to_string(id)];
+    }
+    inline Field& operator[](std::string& name){
+        return this->fields[name];
+    }
+};
+
+extern bscp_value* s_expr(bscp_obj* parent, int priority);
+extern int preprocess();
+
+}
+
+%define parse.error verbose
+
+%union {
+    lex_token token;
+    bscp_value* value;
+    bscp_obj* obj;
+    std::string* punct;
+    long double num;
+}
+
+
+%token <num> NUMBER
+%token <punct> STRING IDENTIFIER
+%token PLUS_EQ "+="
+%token MINUS_EQ "-="
+%token STAR_EQ "*="
+%token SLASH_EQ "/="
+%token PERCENT_EQ "%="
+%token AMPERSAND_EQ "&="
+%token PIPE_EQ "|="
+%token CARET_EQ "^="
+%token LESS_EQ "<="
+%token GREATER_EQ ">="
+%token EQUAL_TO "=="
+%token NOT_EQUAL_TO "!="
+%token SHIFT_LEFT_EQ "<<="
+%token SHIFT_RIGHT_EQ ">>="
+%token LOGIC_AND "&&"
+%token LOGIC_OR "||"
+
+%right '=' "+=" "-=" "*=" "/=" "%=" "<<=" ">>=" "&=" "^=" "|="
+%left ',' ';'
+%right '?' ':'
+%left "||"
+%left "&&" 
+%left '|'
+%left '^'
+%left '&'
+%left "==" "!="
+%left '<' "<=" '>' ">="
+%left "<<" ">>"
+%left '+' '-'
+%left '*' '/' '%'
+%right UNARY
+%nonassoc '[' '.'
+
+%type <value> expr
+%type <obj> object
+%type <value> input
+
+%%
+
+input:
+    %empty { /* empty input */ }
+    | input expr ';' { /* handle expression */ }
+    | input object ';' { /* handle object */ }
+    ;
+
+expr: 
+    NUMBER { $$ = new bscp_num(yyget_extra(), $1); }
+    | STRING { 
+        bscp_obj* obj = new bscp_obj(yyget_extra());
+        for(size_t i = 0; i < $1->size(); i++) {
+            std::string name = std::to_string(i);
+            obj->fields.emplace(name, Field(*new bscp_num(obj, (*$1)[i]), false));
+        }
+        $$ = obj;
+        delete $1;
+      }
+    | IDENTIFIER { 
+        std::string name(*$1);
+        $$ = yyget_extra()->fields[name].value;
+        delete $1;
+      }
+    | '(' expr ')' { $$ = $2; }
+    | '{' object '}' { $$ = $2; }
+    | expr '.' expr { 
+        require_true(dynamic_cast<bscp_obj*>($1), "Left operand of '.' must be an object");
+        $$ = new bscp_num(yyget_extra(), static_cast<bscp_num*>($3)->value);
+      }
+    | expr '[' expr ']' {
+        require_true(dynamic_cast<bscp_obj*>($1), "Left operand of '[]' must be an object");
+        require_true(dynamic_cast<bscp_num*>($3), "Index must be a number");
+        long double index = static_cast<bscp_num*>($3)->value;
+        $$ = static_cast<bscp_obj*>($1)->fields[std::to_string((size_t)index)].value;
+      }
+    | expr '.' IDENTIFIER {
+        require_true(dynamic_cast<bscp_obj*>($1), "Left operand of '.' must be an object");
+        $$ = static_cast<bscp_obj*>($1)->fields[*$3].value;
+        delete $3;
+      }
+    | '+' expr %prec UNARY { 
+        require_true(dynamic_cast<bscp_num*>($2), "Operand of '+' must be a number");
+        $$ = new bscp_num(yyget_extra(), static_cast<bscp_num*>($2)->value);
+      }
+    | '-' expr %prec UNARY { 
+        require_true(dynamic_cast<bscp_num*>($2), "Operand of '-' must be a number");
+        $$ = new bscp_num(yyget_extra(), -static_cast<bscp_num*>($2)->value);
+      }
+    | '!' expr %prec UNARY { 
+        $$ = new bscp_num(yyget_extra(), value2bool($2) ? 0 : 1);
+      }
+    | '~' expr %prec UNARY { 
+        require_true(dynamic_cast<bscp_num*>($2), "Operand of '~' must be a number");
+        long double val = static_cast<bscp_num*>($2)->value;
+        $$ = new bscp_num(yyget_extra(), ~(long)val);
+      }
+    | expr '*' expr { 
+        require_true(dynamic_cast<bscp_num*>($1) && dynamic_cast<bscp_num*>($3), 
+                   "Operands of '*' must be numbers");
+        long double a = static_cast<bscp_num*>($1)->value;
+        long double b = static_cast<bscp_num*>($3)->value;
+        $$ = new bscp_num(yyget_extra(), a * b);
+      }
+    | expr '/' expr { 
+        require_true(dynamic_cast<bscp_num*>($1) && dynamic_cast<bscp_num*>($3), 
+                   "Operands of '/' must be numbers");
+        long double a = static_cast<bscp_num*>($1)->value;
+        long double b = static_cast<bscp_num*>($3)->value;
+        require_true(b != 0, "Division by zero");
+        $$ = new bscp_num(yyget_extra(), a / b);
+      }
+    | expr '+' expr { 
+        require_true(dynamic_cast<bscp_num*>($1) && dynamic_cast<bscp_num*>($3), 
+                   "Operands of '+' must be numbers");
+        long double a = static_cast<bscp_num*>($1)->value;
+        long double b = static_cast<bscp_num*>($3)->value;
+        $$ = new bscp_num(yyget_extra(), a + b);
+      }
+    | expr '-' expr { 
+        require_true(dynamic_cast<bscp_num*>($1) && dynamic_cast<bscp_num*>($3), 
+                   "Operands of '-' must be numbers");
+        long double a = static_cast<bscp_num*>($1)->value;
+        long double b = static_cast<bscp_num*>($3)->value;
+        $$ = new bscp_num(yyget_extra(), a - b);
+      }
+    | expr '<' expr { 
+        require_true(dynamic_cast<bscp_num*>($1) && dynamic_cast<bscp_num*>($3), 
+                   "Operands of '<' must be numbers");
+        long double a = static_cast<bscp_num*>($1)->value;
+        long double b = static_cast<bscp_num*>($3)->value;
+        $$ = new bscp_num(yyget_extra(), a < b ? 1 : 0);
+      }
+    | expr "<=" expr { 
+        require_true(dynamic_cast<bscp_num*>($1) && dynamic_cast<bscp_num*>($3), 
+                   "Operands of '<=' must be numbers");
+        long double a = static_cast<bscp_num*>($1)->value;
+        long double b = static_cast<bscp_num*>($3)->value;
+        $$ = new bscp_num(yyget_extra(), a <= b ? 1 : 0);
+      }
+    | expr '>' expr { 
+        require_true(dynamic_cast<bscp_num*>($1) && dynamic_cast<bscp_num*>($3), 
+                   "Operands of '>' must be numbers");
+        long double a = static_cast<bscp_num*>($1)->value;
+        long double b = static_cast<bscp_num*>($3)->value;
+        $$ = new bscp_num(yyget_extra(), a > b ? 1 : 0);
+      }
+    | expr ">=" expr { 
+        require_true(dynamic_cast<bscp_num*>($1) && dynamic_cast<bscp_num*>($3), 
+                   "Operands of '>=' must be numbers");
+        long double a = static_cast<bscp_num*>($1)->value;
+        long double b = static_cast<bscp_num*>($3)->value;
+        $$ = new bscp_num(yyget_extra(), a >= b ? 1 : 0);
+      }
+    | expr "==" expr { 
+        require_true(dynamic_cast<bscp_num*>($1) && dynamic_cast<bscp_num*>($3), 
+                   "Operands of '==' must be numbers");
+        long double a = static_cast<bscp_num*>($1)->value;
+        long double b = static_cast<bscp_num*>($3)->value;
+        $$ = new bscp_num(yyget_extra(), a == b ? 1 : 0);
+      }
+    | expr "!=" expr { 
+        require_true(dynamic_cast<bscp_num*>($1) && dynamic_cast<bscp_num*>($3), 
+                   "Operands of '!=' must be numbers");
+        long double a = static_cast<bscp_num*>($1)->value;
+        long double b = static_cast<bscp_num*>($3)->value;
+        $$ = new bscp_num(yyget_extra(), a != b ? 1 : 0);
+      }
+    | expr '&' expr { 
+        require_true(dynamic_cast<bscp_num*>($1) && dynamic_cast<bscp_num*>($3), 
+                   "Operands of '&' must be numbers");
+        long double a = static_cast<bscp_num*>($1)->value;
+        long double b = static_cast<bscp_num*>($3)->value;
+        $$ = new bscp_num(yyget_extra(), (long)a & (long)b);
+      }
+    | expr '|' expr { 
+        require_true(dynamic_cast<bscp_num*>($1) && dynamic_cast<bscp_num*>($3), 
+                   "Operands of '|' must be numbers");
+        long double a = static_cast<bscp_num*>($1)->value;
+        long double b = static_cast<bscp_num*>($3)->value;
+        $$ = new bscp_num(yyget_extra(), (long)a | (long)b);
+      }
+    | expr '^' expr { 
+        require_true(dynamic_cast<bscp_num*>($1) && dynamic_cast<bscp_num*>($3), 
+                   "Operands of '^' must be numbers");
+        long double a = static_cast<bscp_num*>($1)->value;
+        long double b = static_cast<bscp_num*>($3)->value;
+        $$ = new bscp_num(yyget_extra(), (long)a ^ (long)b);
+      }
+    | expr "&&" expr { 
+        $$ = new bscp_num(yyget_extra(), value2bool($1) && value2bool($3) ? 1 : 0);
+      }
+    | expr "||" expr { 
+        $$ = new bscp_num(yyget_extra(), value2bool($1) || value2bool($3) ? 1 : 0);
+      }
+    | expr '?' expr ':' expr { 
+        $$ = value2bool($1) ? $3 : $5;
+      }
+    | expr '=' expr {
+        require_true($1->parent != nullptr, "Left operand must be assignable");
+        $$ = $3;
+        $1->parent->fields[$1->name] = Field(*$3, false);
+      }
+    | expr "+=" expr {
+        require_true(dynamic_cast<bscp_num*>($1) && dynamic_cast<bscp_num*>($3), 
+                   "Operands of '+=' must be numbers");
+        long double a = static_cast<bscp_num*>($1)->value;
+        long double b = static_cast<bscp_num*>($3)->value;
+        $$ = new bscp_num(yyget_extra(), a + b);
+        $1->parent->fields[$1->name] = Field(*$$, false);
+      }
+    | expr "-=" expr {
+        require_true(dynamic_cast<bscp_num*>($1) && dynamic_cast<bscp_num*>($3), 
+                   "Operands of '-=' must be numbers");
+        long double a = static_cast<bscp_num*>($1)->value;
+        long double b = static_cast<bscp_num*>($3)->value;
+        $$ = new bscp_num(yyget_extra(), a - b);
+        $1->parent->fields[$1->name] = Field(*$$, false);
+      }
+    | expr "*=" expr {
+        require_true(dynamic_cast<bscp_num*>($1) && dynamic_cast<bscp_num*>($3), 
+                   "Operands of '*=' must be numbers");
+        long double a = static_cast<bscp_num*>($1)->value;
+        long double b = static_cast<bscp_num*>($3)->value;
+        $$ = new bscp_num(yyget_extra(), a * b);
+        $1->parent->fields[$1->name] = Field(*$$, false);
+      }
+    | expr "/=" expr {
+        require_true(dynamic_cast<bscp_num*>($1) && dynamic_cast<bscp_num*>($3), 
+                   "Operands of '/=' must be numbers");
+        long double a = static_cast<bscp_num*>($1)->value;
+        long double b = static_cast<bscp_num*>($3)->value;
+        require_true(b != 0, "Division by zero");
+        $$ = new bscp_num(yyget_extra(), a / b);
+        $1->parent->fields[$1->name] = Field(*$$, false);
+      }
+    | expr "%=" expr {
+        require_true(dynamic_cast<bscp_num*>($1) && dynamic_cast<bscp_num*>($3), 
+                   "Operands of '%%=' must be numbers");
+        long double a = static_cast<bscp_num*>($1)->value;
+        long double b = static_cast<bscp_num*>($3)->value;
+        require_true(b != 0, "Modulo by zero");
+        $$ = new bscp_num(yyget_extra(), std::remainder(a, b));
+        $1->parent->fields[$1->name] = Field(*$$, false);
+      }
+    | expr "<<=" expr {
+        require_true(dynamic_cast<bscp_num*>($1) && dynamic_cast<bscp_num*>($3), 
+                   "Operands of '<<=' must be numbers");
+        long a = static_cast<long>(static_cast<bscp_num*>($1)->value);
+        long b = static_cast<long>(static_cast<bscp_num*>($3)->value);
+        $$ = new bscp_num(yyget_extra(), a << b);
+        $1->parent->fields[$1->name] = Field(*$$, false);
+      }
+    | expr ">>=" expr {
+        require_true(dynamic_cast<bscp_num*>($1) && dynamic_cast<bscp_num*>($3), 
+                   "Operands of '>>=' must be numbers");
+        long a = static_cast<long>(static_cast<bscp_num*>($1)->value);
+        long b = static_cast<long>(static_cast<bscp_num*>($3)->value);
+        $$ = new bscp_num(yyget_extra(), a >> b);
+        $1->parent->fields[$1->name] = Field(*$$, false);
+      }
+    | expr "&=" expr {
+        require_true(dynamic_cast<bscp_num*>($1) && dynamic_cast<bscp_num*>($3),
+                   "Operands of '&=' must be numbers");
+        long a = static_cast<long>(static_cast<bscp_num*>($1)->value);
+        long b = static_cast<long>(static_cast<bscp_num*>($3)->value);
+        $$ = new bscp_num(yyget_extra(), a & b);
+        $1->parent->fields[$1->name] = Field(*$$, false);
+      }
+    | expr "|=" expr {
+        require_true(dynamic_cast<bscp_num*>($1) && dynamic_cast<bscp_num*>($3),
+                   "Operands of '|=' must be numbers");
+        long a = static_cast<long>(static_cast<bscp_num*>($1)->value);
+        long b = static_cast<long>(static_cast<bscp_num*>($3)->value);
+        $$ = new bscp_num(yyget_extra(), a | b);
+        $1->parent->fields[$1->name] = Field(*$$, false);
+      }
+    | expr "^=" expr {
+        require_true(dynamic_cast<bscp_num*>($1) && dynamic_cast<bscp_num*>($3),
+                   "Operands of '^=' must be numbers");
+        long a = static_cast<long>(static_cast<bscp_num*>($1)->value);
+        long b = static_cast<long>(static_cast<bscp_num*>($3)->value);
+        $$ = new bscp_num(yyget_extra(), a ^ b);
+        $1->parent->fields[$1->name] = Field(*$$, false);
+      }
+    | expr ',' expr { $$ = $3; }
+    ;
+
+object:
+    '{' expr '}' {
+        $$ = new bscp_obj(yyget_extra()); 
+    }
+    /* '{' '}' { $$ = new bscp_obj(yyget_extra()); }
+    | '{' object_items '}' { $$ = static_cast<bscp_obj*>($2); } */
+    ;
+
+//object_items:
+//    expr { $$ = static_cast<bscp_value*>(s_obj(yyget_extra(), $1)); }
+//    | object_items ',' expr { /* handle multiple items */ }
+//    ; 
+
+%%
+
+void yy::parser::error(const std::string& msg) {
+    fprintf(stderr, "Error: %s\n", msg.c_str());
+}
+
+/* bscp_obj* s_obj(bscp_obj* parent, bscp_value* first) {
+    bscp_obj* obj = new bscp_obj(parent);
+    
+    // Add first item if provided
+    if (first) {
+        // For all types, add as anonymous field
+        obj->fields.emplace("", Field(*first, false));
+    }
+
+    // Process remaining items (if any)
+    struct lex_token t;
+    while (lex_next(&t) && t.type != lex_punctuation) {
+        bscp_value* value = s_expr(obj, std::numeric_limits<int>::max());
+        if (!value) {
+            delete obj;
+            return nullptr;
+        }
+    }
+
+    // Clean up temporary fields
+    for (auto it = obj->fields.begin(); it != obj->fields.end(); ) {
+        if (it->second.is_tmp) {
+            obj->fields.erase(it++);
+        } else {
+            ++it;
+        }
+    }
+
+    return obj;
+} */
+
+int yylex(yy::parser::value_type* value){
+    lex_next(&value->token);
+    return value->token.type;
+}

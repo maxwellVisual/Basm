@@ -3,7 +3,7 @@ FLEX = flex
 CFLAGS = -Wall -g
 
 # 目标文件
-OBJS = lex.yy.o lex.o
+OBJS = lex.o lex.yy.o
 
 # 默认目标
 all: liblexer.a

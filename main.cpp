@@ -11,7 +11,8 @@ extern "C" {
     #include "lex.h"
 }
 #include "parser.h"
-#include "bscp.h"
+#include "lex.h"
+#include "bscp.hpp"
 
 #define LEX_TOKEN_STREAM_BUFSIZE BUFSIZ
 

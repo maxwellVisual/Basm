@@ -12,7 +12,7 @@ extern int yyleng;
         current_token.type = token_type; \
         current_token.raw_size = yyleng; \
         current_token.raw = yyleng > 0 ? strndup(yytext, yyleng) : NULL; \
-        return 1; \
+        return token_type; \
     } while(0)
 
 /* 设置不同类型token的辅助宏 */

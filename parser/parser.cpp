@@ -8,7 +8,7 @@
 #include <stdexcept>
 
 #include "lex.h"
-#include "preprocessor.h"
+#include "bscp.hpp"
 
 AstNode::~AstNode(){
     for (AstNode* node : child) {
@@ -169,7 +169,8 @@ AstNode* s_code_block(AstNode* parent, lex_token& token)
         switch(token.type)
         {
         case lex_punctuation:
-            preprocess();
+            // preprocess();
+            puts("todo: preprocess"); //todo: preprocess
             break;
         case lex_word:
             s_func_def(node, token);

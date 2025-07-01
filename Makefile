@@ -6,6 +6,12 @@ PREPROCESSOR_DIR ?= ./basm-script
 EXAMPLES_DIR ?= ./examples
 LDFLAGS ?=  -lfl -ly -L$(LEXER_DIR) -L$(PARSER_DIR) -L$(PREPROCESSOR_DIR) -lparser -llexer -lbscp
 
+
+LEXER_LIB = $(LEXER_DIR)/liblexer.a
+PARSER_LIB = $(PARSER_DIR)/libparser.a
+PREPROCESSOR_LIB = $(PREPROCESSOR_DIR)/libbscp.a
+LIBS = $(LEXER_LIB) $(PARSER_LIB) $(PREPROCESSOR_LIB)
+
 # 默认目标
 all: main
 
@@ -14,20 +20,19 @@ $(LEXER_DIR)/liblexer.a:
 	$(MAKE) -C $(LEXER_DIR) LEXER_DIR=$(abspath $(LEXER_DIR))
 
 # 构建语法分析器库
-$(PARSER_DIR)/libparser.a:
+$(PARSER_DIR)/libparser.a: $(PREPROCESSOR_DIR)/bscp.hpp
 	$(MAKE) -C $(PARSER_DIR) LEXER_DIR=$(abspath $(LEXER_DIR)) PREPROCESSOR_DIR=$(abspath $(PREPROCESSOR_DIR))
-# 构建语法分析器库
 
-preprocessor_lib: $(LEXER_DIR)/liblexer.a
-	cp $(LEXER_DIR)/liblexer.a $(PREPROCESSOR_DIR)
+# 构建预编译器库
+$(PREPROCESSOR_DIR)/libbscp.a $(PREPROCESSOR_DIR)/bscp.hpp: $(LEXER_DIR)/liblexer.a
 	$(MAKE) -C $(PREPROCESSOR_DIR) LEXER_DIR=$(abspath $(LEXER_DIR))
 
 # 编译C++主程序
-main.o: main.cpp $(LEXER_DIR)/lex.h $(PARSER_DIR)/parser.h $(PREPROCESSOR_DIR)/bscp.h
+main.o: main.cpp $(LEXER_DIR)/lex.h $(PARSER_DIR)/parser.h $(PREPROCESSOR_DIR)/bscp.hpp $(LIBS)
 	$(CXX) $(CXXFLAGS) -I$(LEXER_DIR) -I$(PARSER_DIR) -I$(PREPROCESSOR_DIR) -c $< -o $@
 
 # 链接程序
-main: main.o $(LEXER_DIR)/liblexer.a $(PARSER_DIR)/libparser.a preprocessor_lib
+main: main.o $(LIBS)
 	$(CXX) $(CXXFLAGS) -o $@ main.o $(LDFLAGS)
 
 # 创建示例目录
@@ -51,4 +56,4 @@ clean:
 	rm -f main.o main test.c
 	rm -rf $(EXAMPLES_DIR)
 
-.PHONY: all lexer_lib parser_lib test clean
+.PHONY: all test clean

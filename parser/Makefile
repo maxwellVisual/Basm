@@ -12,7 +12,7 @@ OBJS = parser.o
 all: libparser.a
 
 # 编译目标文件
-parser.o: parser.cpp parser.h
+parser.o: parser.cpp parser.h $(PREPROCESSOR_DIR)/bscp.hpp
 	$(CC) $(CFLAGS) -c $< -o $@
 
 # 构建语法分析器库
